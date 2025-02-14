@@ -8,8 +8,45 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
-// WINDOW SIZE CONSTANTS
+// UTILITY
 const winWidth, winHeight int = 800, 600
+
+type gameState uint8
+
+const (
+	start gameState = iota
+	play
+	pause
+)
+
+var state = start
+
+type color struct {
+	r, g, b, a byte
+}
+
+var white color = color{255, 255, 255, 255}
+
+type position struct {
+	x, y float32
+}
+
+type ball struct {
+	position
+	radius float32
+	xVel   float32
+	yVel   float32
+	color  color
+}
+
+type paddle struct {
+	position
+	width  float32
+	height float32
+	speed  float32
+	score  int
+	color  color
+}
 
 var scoreNums = [][]byte{
 	{1, 1, 1,
@@ -73,29 +110,12 @@ var scoreNums = [][]byte{
 		1, 1, 1},
 }
 
-// UTILITY STRUCTS
-type color struct {
-	r, g, b, a byte
-}
-
-type position struct {
-	x, y float32
-}
-
-type ball struct {
-	position
-	radius float32
-	xVel   float32
-	yVel   float32
-	color  color
-}
-
-type paddle struct {
-	position
-	width  float32
-	height float32
-	speed  float32
-	color  color
+var titleLetters = []byte{
+	1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1,
+	1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0,
+	1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0,
+	0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0,
+	1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0,
 }
 
 // BALL FUNCITONS
@@ -113,25 +133,50 @@ func (ball *ball) update(leftPaddle *paddle, rightPaddle *paddle, elapsedTime fl
 	ball.x += ball.xVel * elapsedTime
 	ball.y += ball.yVel * elapsedTime
 
-	if (ball.y-float32(ball.radius)) < 0 || (ball.y+float32(ball.radius)) > float32(winHeight) {
+	if (ball.y - float32(ball.radius)) < 0 {
 		ball.yVel = -ball.yVel
+		ball.y = ball.radius
 	}
 
-	if ball.x < 0 || ball.x > float32(winWidth) {
+	if (ball.y + float32(ball.radius)) > float32(winHeight) {
+		ball.yVel = -ball.yVel
+		ball.y = float32(winHeight) - ball.radius
+	}
+
+	if ball.x-ball.radius < 0 {
 		ball.position = getScreenCenter()
+		leftPaddle.y = float32(winHeight) / 2
+		rightPaddle.y = float32(winHeight) / 2
+		rightPaddle.score++
+	}
+
+	if ball.x+ball.radius > float32(winWidth) {
+		ball.position = getScreenCenter()
+		leftPaddle.y = float32(winHeight) / 2
+		rightPaddle.y = float32(winHeight) / 2
+		leftPaddle.score++
+	}
+
+	if rightPaddle.score == 9 || leftPaddle.score == 9 {
+		resetGame(leftPaddle, rightPaddle, ball)
 	}
 
 	if ball.x-ball.radius < leftPaddle.x+leftPaddle.width/2 &&
 		ball.y < leftPaddle.y+leftPaddle.height/2 &&
 		ball.y > leftPaddle.y-leftPaddle.height/2 {
 		ball.xVel = -ball.xVel
+		ball.x = leftPaddle.x + leftPaddle.width/2 + ball.radius
 	}
 
 	if ball.x+ball.radius > rightPaddle.x-rightPaddle.width/2 &&
 		ball.y < rightPaddle.y+rightPaddle.height/2 &&
 		ball.y > rightPaddle.y-rightPaddle.height/2 {
 		ball.xVel = -ball.xVel
+		ball.x = rightPaddle.x - rightPaddle.width/2 - ball.radius
 	}
+
+	ball.xVel *= 1.0002
+	ball.yVel *= 1.0002
 }
 
 // PADDLE FUNCTIONS
@@ -144,6 +189,9 @@ func (paddle *paddle) draw(pixels []byte) {
 			setPixel(startX+x, startY+y, paddle.color, pixels)
 		}
 	}
+
+	numX := lerp(paddle.x, getScreenCenter().x, .2)
+	drawScore(position{numX, 60}, paddle.color, 15, paddle.score, pixels)
 }
 
 func (paddle *paddle) update(keyState []uint8, elapsedTime float32) {
@@ -180,8 +228,63 @@ func getScreenCenter() position {
 	return position{float32(winWidth / 2), float32(winHeight / 2)}
 }
 
+func drawScore(pos position, color color, size int, num int, pixels []byte) {
+	startX := int(pos.x) - (size*3)/2
+	startY := int(pos.y) - (size*5)/2
+
+	for i, v := range scoreNums[num] {
+		if v == 1 {
+			for y := startY; y < startY+size; y++ {
+				for x := startX; x < startX+size; x++ {
+					setPixel(x, y, color, pixels)
+				}
+			}
+		}
+		startX += size
+		if (i+1)%3 == 0 {
+			startY += size
+			startX -= size * 3
+		}
+	}
+}
+
+func drawTitle(size int, pixels []byte) {
+	startX := (winWidth - (19 * size)) / 2
+	startY := (winHeight - (5 * size)) / 2
+
+	for i, v := range titleLetters {
+		if v == 1 {
+			for y := startY; y < startY+size; y++ {
+				for x := startX; x < startX+size; x++ {
+					setPixel(x, y, white, pixels)
+				}
+			}
+		}
+		startX += size
+		if (i+1)%19 == 0 {
+			startY += size
+			startX -= size * 19
+		}
+	}
+
+}
+
+func lerp(a float32, b float32, pct float32) float32 {
+	return a + pct*(b-a)
+}
+
+func resetGame(leftPaddle *paddle, rightPaddle *paddle, ball *ball) {
+	leftPaddle.y = float32(winHeight) / 2
+	rightPaddle.y = float32(winHeight) / 2
+	leftPaddle.score = 0
+	rightPaddle.score = 0
+	ball.position = getScreenCenter()
+	state = start
+}
+
 // -----------GAME START-------------
 func main() {
+	// ACTIVATE ALL SDL THINGS
 	err := sdl.Init(sdl.INIT_EVERYTHING)
 	if err != nil {
 		fmt.Println(err)
@@ -211,20 +314,14 @@ func main() {
 	}
 	defer texture.Destroy()
 
-	pixels := make([]byte, winWidth*winHeight*4)
+	pixels := make([]byte, winWidth*winHeight*4) // CREATE PIXEL BUFFER
 
-	/* for y := 0; y < winHeight; y++ {
-		for x := 0; x < winWidth; x++ {
-			setPixel(x, y, color{byte(x % 255), byte(y % 255), 0, 0}, pixels)
-		}
-	} */
-
-	player1 := paddle{position{50, 100}, 20, 100, 300, color{255, 255, 255, 0}}
-	player2 := paddle{position{float32(winWidth - 50), 100}, 20, 100, 300, color{255, 255, 255, 0}}
-	ball := ball{position{300, 300}, 20, 350, 350, color{255, 255, 255, 0}}
+	// CREATE ENTITIES
+	player1 := paddle{position{50, float32(winHeight) / 2}, 20, 100, 300, 0, white}
+	player2 := paddle{position{float32(winWidth - 50), float32(winHeight) / 2}, 20, 100, 300, 0, white}
+	ball := ball{position{300, 300}, 20, 350, 350, white}
 
 	keyState := sdl.GetKeyboardState()
-
 	var frameStart time.Time
 	var elapsedTime float32
 
@@ -232,6 +329,7 @@ func main() {
 	for {
 		frameStart = time.Now()
 
+		// POLL FOR EXIT BUTTON EVENT
 		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 			switch event.(type) {
 			case *sdl.QuitEvent:
@@ -239,25 +337,39 @@ func main() {
 			}
 		}
 
-		clear(pixels)
+		// ENTER ENTITY PIXELS INTO PIXEL BUFFER
+		clear(pixels) // CLEARS ENTIRE PIXEL BUFFER EVERY FRAME
+		if state != start {
+			player1.draw(pixels)
+			player2.draw(pixels)
+			ball.draw(pixels)
+		}
 
-		player1.update(keyState, elapsedTime)
-		player2.aiUpdate(&ball)
-		ball.update(&player1, &player2, elapsedTime)
+		if state == play {
+			// UPDATE ENTITIES
+			player1.update(keyState, elapsedTime)
+			player2.aiUpdate(&ball)
+			ball.update(&player1, &player2, elapsedTime)
+		} else if state == start {
+			drawTitle(15, pixels)
+			if keyState[sdl.SCANCODE_SPACE] != 0 {
+				player1.score = 0
+				player2.score = 0
+				state = play
+			}
+		}
 
-		player1.draw(pixels)
-		player2.draw(pixels)
-		ball.draw(pixels)
-
+		// SET TEXTURE TO PIXEL BUFFER
 		texture.Update(nil, unsafe.Pointer(&pixels[0]), winWidth*4)
 		renderer.Copy(texture, nil, nil)
 		renderer.Present()
 
+		// UPDATE IS FRAMERATE INDEPENDENT AND CAPS FRAMERATE AT 200
 		elapsedTime = float32(time.Since(frameStart).Seconds())
 		if elapsedTime < .005 {
 			sdl.Delay(5 - uint32(elapsedTime/1000.0))
 			elapsedTime = float32(time.Since(frameStart).Seconds())
 		}
+		fmt.Println("(xVel,yVel):  (", ball.xVel, ",", ball.yVel, ")")
 	}
-
 }
